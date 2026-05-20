@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RAW Photo Editor</title>
+  <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
+  <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0f1117;
+      --surface: #1a1d27;
+      --panel:   #20242f;
+      --border:  #2e3244;
+      --accent:  #5b7cf6;
+      --accent2: #7c3aed;
+      --text:    #e2e4f0;
+      --muted:   #6b7280;
+      --success: #22c55e;
+      --warn:    #f59e0b;
+      --danger:  #ef4444;
+      --radius:  10px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    header h1 { font-size: 17px; font-weight: 600; letter-spacing: -0.3px; }
+    header .badge {
+      background: var(--accent2);
+      color: #fff;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-weight: 500;
+    }
+    header .spacer { flex: 1; }
+    header .format-pills { display: flex; gap: 6px; }
+    header .format-pills span {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 2px 8px;
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    .workspace {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 280px 1fr 260px;
+      gap: 0;
+      overflow: hidden;
+    }
+
+    /* ── LEFT: upload + histogram ── */
+    .sidebar-left {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    .drop-zone {
+      margin: 16px;
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 32px 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      position: relative;
+    }
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: var(--accent);
+      background: rgba(91, 124, 246, 0.06);
+    }
+    .drop-zone input[type=file] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
+    .drop-zone .icon { font-size: 32px; margin-bottom: 10px; }
+    .drop-zone p { color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .drop-zone strong { color: var(--text); }
+
+    .file-info {
+      margin: 0 16px 16px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px;
+      display: none;
+    }
+    .file-info.visible { display: block; }
+    .file-info .name { font-weight: 600; word-break: break-all; margin-bottom: 4px; }
+    .file-info .meta { color: var(--muted); font-size: 12px; }
+
+    .section-title {
+      padding: 12px 16px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+    }
+
+    canvas#histogram {
+      display: block;
+      margin: 0 16px 16px;
+      width: calc(100% - 32px);
+      height: 80px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+
+    /* ── CENTER: preview ── */
+    .preview-area {
+      background: #080a0f;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .preview-area canvas#preview {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+    .preview-placeholder {
+      text-align: center;
+      color: var(--muted);
+    }
+    .preview-placeholder .big { font-size: 48px; margin-bottom: 16px; opacity: 0.3; }
+    .preview-placeholder p { font-size: 13px; }
+
+    #loading-overlay {
+      position: absolute; inset: 0;
+      background: rgba(8, 10, 15, 0.85);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 12px;
+      z-index: 10;
+    }
+    #loading-overlay.visible { display: flex; }
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading-overlay p { color: var(--muted); font-size: 13px; }
+
+    /* ── RIGHT: controls ── */
+    .sidebar-right {
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    .control-group { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+    .control-group:last-child { border-bottom: none; }
+    .control-group h3 {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--muted); margin-bottom: 12px;
+    }
+
+    .slider-row { margin-bottom: 10px; }
+    .slider-row label {
+      display: flex; justify-content: space-between;
+      font-size: 12px; color: var(--text); margin-bottom: 4px;
+    }
+    .slider-row label span { color: var(--accent); font-weight: 600; min-width: 36px; text-align: right; }
+    .slider-row input[type=range] {
+      width: 100%; height: 4px; cursor: pointer;
+      -webkit-appearance: none; appearance: none;
+      background: var(--border); border-radius: 2px; outline: none;
+    }
+    .slider-row input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 14px; height: 14px;
+      background: var(--accent); border-radius: 50%; cursor: pointer;
+    }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 6px; padding: 8px 14px; border-radius: 8px;
+      font-size: 13px; font-weight: 500; cursor: pointer;
+      border: none; transition: opacity 0.15s, transform 0.1s;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { opacity: 0.88; }
+    .btn-secondary { background: var(--panel); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-success:hover:not(:disabled) { opacity: 0.88; }
+
+    .action-row { display: flex; gap: 8px; flex-wrap: wrap; padding: 14px 16px; }
+
+    #status-bar {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 6px 20px;
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      gap: 20px;
+    }
+    #status-bar .ok { color: var(--success); }
+    #status-bar .warn { color: var(--warn); }
+    #status-bar .err { color: var(--danger); }
+
+    .wb-presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+    .wb-presets button {
+      background: var(--panel); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; padding: 3px 9px;
+      font-size: 11px; cursor: pointer; transition: border-color 0.15s;
+    }
+    .wb-presets button:hover { border-color: var(--accent); color: var(--accent); }
+    .wb-presets button.active { border-color: var(--accent); background: rgba(91,124,246,0.12); color: var(--accent); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>RAW Photo Editor</h1>
+  <span class="badge">PyScript + AWS Lambda</span>
+  <div class="spacer"></div>
+  <div class="format-pills">
+    <span>JPEG</span><span>RAW</span><span>NEF</span><span>CR2</span><span>ARW</span>
+  </div>
+</header>
+
+<div class="workspace">
+
+  <!-- LEFT SIDEBAR -->
+  <aside class="sidebar-left">
+    <div class="drop-zone" id="drop-zone">
+      <input type="file" id="file-input" accept=".jpg,.jpeg,.raw,.nef,.cr2,.arw,.dng,.orf,.rw2" />
+      <div class="icon">📷</div>
+      <p><strong>Drop a photo here</strong><br>or click to browse<br><br>JPEG · RAW · NEF · CR2 · ARW</p>
+    </div>
+
+    <div class="file-info" id="file-info">
+      <div class="name" id="fi-name">—</div>
+      <div class="meta" id="fi-meta">—</div>
+    </div>
+
+    <div class="section-title">Histogram</div>
+    <canvas id="histogram"></canvas>
+  </aside>
+
+  <!-- CENTER PREVIEW -->
+  <main class="preview-area" id="preview-area">
+    <div class="preview-placeholder" id="preview-placeholder">
+      <div class="big">🖼</div>
+      <p>Open a photo to start editing</p>
+    </div>
+    <canvas id="preview" style="display:none;"></canvas>
+    <div id="loading-overlay">
+      <div class="spinner"></div>
+      <p id="loading-msg">Processing…</p>
+    </div>
+  </main>
+
+  <!-- RIGHT CONTROLS -->
+  <aside class="sidebar-right">
+
+    <div class="control-group">
+      <h3>Tone</h3>
+      <div class="slider-row">
+        <label>Exposure <span id="v-exposure">0</span></label>
+        <input type="range" id="sl-exposure" min="-3" max="3" step="0.05" value="0" />
+      </div>
+      <div class="slider-row">
+        <label>Highlights <span id="v-highlights">0</span></label>
+        <input type="range" id="sl-highlights" min="-100" max="100" step="1" value="0" />
+      </div>
+      <div class="slider-row">
+        <label>Shadows <span id="v-shadows">0</span></label>
+        <input type="range" id="sl-shadows" min="-100" max="100" step="1" value="0" />
+      </div>
+      <div class="slider-row">
+        <label>Blacks <span id="v-blacks">0</span></label>
+        <input type="range" id="sl-blacks" min="-100" max="100" step="1" value="0" />
+      </div>
+      <div class="slider-row">
+        <label>Whites <span id="v-whites">0</span></label>
+        <input type="range" id="sl-whites" min="-100" max="100" step="1" value="0" />
+      </div>
+    </div>
+
+    <div class="control-group">
+      <h3>Colour</h3>
+      <div class="slider-row">
+        <label>Temperature <span id="v-temp">0</span></label>
+        <input type="range" id="sl-temp" min="-100" max="100" step="1" value="0" />
+      </div>
+      <div class="slider-row">
+        <label>Tint <span id="v-tint">0</span></label>
+        <input type="range" id="sl-tint" min="-100" max="100" step="1" value="0" />
+      </div>
+      <div class="slider-row">
+        <label>Vibrance <span id="v-vibrance">0</span></label>
+        <input type="range" id="sl-vibrance" min="-100" max="100" step="1" value="0" />
+      </div>
+      <div class="slider-row">
+        <label>Saturation <span id="v-saturation">0</span></label>
+        <input type="range" id="sl-saturation" min="-100" max="100" step="1" value="0" />
+      </div>
+    </div>
+
+    <div class="control-group">
+      <h3>White balance presets</h3>
+      <div class="wb-presets">
+        <button class="active" onclick="applyWBPreset('as-shot')">As Shot</button>
+        <button onclick="applyWBPreset('daylight')">Daylight</button>
+        <button onclick="applyWBPreset('cloudy')">Cloudy</button>
+        <button onclick="applyWBPreset('shade')">Shade</button>
+        <button onclick="applyWBPreset('tungsten')">Tungsten</button>
+        <button onclick="applyWBPreset('fluorescent')">Fluorescent</button>
+        <button onclick="applyWBPreset('flash')">Flash</button>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <h3>Detail</h3>
+      <div class="slider-row">
+        <label>Sharpness <span id="v-sharpness">0</span></label>
+        <input type="range" id="sl-sharpness" min="0" max="150" step="1" value="0" />
+      </div>
+      <div class="slider-row">
+        <label>Noise reduction <span id="v-nr">0</span></label>
+        <input type="range" id="sl-nr" min="0" max="100" step="1" value="0" />
+      </div>
+    </div>
+
+    <div class="control-group">
+      <h3>Output</h3>
+      <div class="slider-row">
+        <label>JPEG quality <span id="v-quality">90</span></label>
+        <input type="range" id="sl-quality" min="60" max="100" step="1" value="90" />
+      </div>
+    </div>
+
+    <div class="action-row">
+      <button class="btn btn-secondary" id="btn-reset" disabled onclick="resetControls()">Reset</button>
+      <button class="btn btn-primary" id="btn-process" disabled onclick="processImage()">Process</button>
+      <button class="btn btn-success" id="btn-download" disabled onclick="downloadResult()">Download</button>
+    </div>
+
+  </aside>
+</div>
+
+<div id="status-bar">
+  <span id="status-msg">Ready — open a photo to begin</span>
+  <span id="status-dim"></span>
+  <span id="status-format"></span>
+</div>
+
+<!-- PyScript config -->
+<py-config>
+packages = []
+</py-config>
+
+<py-script>
+import js
+import json
+import base64
+from pyodide.http import pyfetch
+from pyodide.ffi import to_js
+
+API_BASE = js.window.API_BASE if hasattr(js.window, "API_BASE") else "https://YOUR_API_GATEWAY_URL"
+
+current_file = None
+result_url   = None
+
+def log(msg, level=""):
+    el = js.document.getElementById("status-msg")
+    el.textContent = msg
+    el.className = level
+
+def show_loading(msg="Processing…"):
+    ov = js.document.getElementById("loading-overlay")
+    ov.classList.add("visible")
+    js.document.getElementById("loading-msg").textContent = msg
+
+def hide_loading():
+    js.document.getElementById("loading-overlay").classList.remove("visible")
+
+def get_params():
+    sliders = ["exposure","highlights","shadows","blacks","whites",
+               "temp","tint","vibrance","saturation","sharpness","nr","quality"]
+    return {s: float(js.document.getElementById(f"sl-{s}").value) for s in sliders}
+
+async def upload_and_process(file_obj, params):
+    global result_url
+    show_loading("Requesting upload URL…")
+    log("Requesting presigned upload URL…")
+
+    # 1. Get presigned URL
+    resp = await pyfetch(f"{API_BASE}/upload", method="POST",
+        headers={"Content-Type": "application/json"},
+        body=json.dumps({"filename": file_obj.name, "content_type": file_obj.type or "application/octet-stream"})
+    )
+    upload_data = await resp.json()
+    job_id      = upload_data["job_id"]
+    presigned   = upload_data["upload_url"]
+
+    # 2. Upload raw file directly to S3
+    show_loading("Uploading to S3…")
+    log("Uploading file to S3…")
+    array_buf = await file_obj.arrayBuffer()
+    await pyfetch(presigned, method="PUT",
+        headers={"Content-Type": file_obj.type or "application/octet-stream"},
+        body=array_buf
+    )
+
+    # 3. Trigger edit Lambda
+    show_loading("Processing RAW/JPEG…")
+    log("Lambda processing (rawpy + numpy)…")
+    edit_resp = await pyfetch(f"{API_BASE}/edit", method="POST",
+        headers={"Content-Type": "application/json"},
+        body=json.dumps({"job_id": job_id, "params": params})
+    )
+    edit_data = await edit_resp.json()
+
+    # 4. Get signed download URL
+    show_loading("Fetching result…")
+    del_resp  = await pyfetch(f"{API_BASE}/result/{edit_data['result_key']}", method="GET")
+    del_data  = await del_resp.json()
+    result_url = del_data["download_url"]
+
+    # 5. Load result into canvas preview
+    show_loading("Rendering preview…")
+    img = js.Image.new()
+    img.src = result_url
+    await js.Promise.new(lambda res, rej: (setattr(img, "onload", res), setattr(img, "onerror", rej)))
+    canvas  = js.document.getElementById("preview")
+    ctx     = canvas.getContext("2d")
+    canvas.width  = img.naturalWidth
+    canvas.height = img.naturalHeight
+    ctx.drawImage(img, 0, 0)
+    js.document.getElementById("preview-placeholder").style.display = "none"
+    canvas.style.display = "block"
+    draw_histogram(canvas, ctx)
+    js.document.getElementById("btn-download").disabled = False
+    hide_loading()
+    log(f"Done — {img.naturalWidth}×{img.naturalHeight}px", "ok")
+    js.document.getElementById("status-dim").textContent = f"{img.naturalWidth}×{img.naturalHeight}"
+
+def draw_histogram(canvas, ctx):
+    hc  = js.document.getElementById("histogram")
+    htx = hc.getContext("2d")
+    hc.width  = hc.offsetWidth or 248
+    hc.height = 80
+    idata = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    data  = idata.data
+    r_hist = [0]*256
+    g_hist = [0]*256
+    b_hist = [0]*256
+    step = max(1, len(data) // (4 * 4000))
+    i = 0
+    while i < len(data):
+        r_hist[data[i]]   += 1
+        g_hist[data[i+1]] += 1
+        b_hist[data[i+2]] += 1
+        i += 4 * step
+    max_v = max(max(r_hist), max(g_hist), max(b_hist), 1)
+    w, h  = hc.width, hc.height
+    htx.clearRect(0, 0, w, h)
+    bar_w = w / 256
+    channels = [("rgba(239,68,68,0.6)", r_hist), ("rgba(34,197,94,0.6)", g_hist), ("rgba(59,130,246,0.6)", b_hist)]
+    for color, hist in channels:
+        htx.fillStyle = color
+        for idx in range(256):
+            bar_h = int((hist[idx] / max_v) * h)
+            htx.fillRect(idx * bar_w, h - bar_h, bar_w, bar_h)
+
+async def on_file_change(event):
+    global current_file
+    files = event.target.files
+    if not files.length:
+        return
+    f = files.item(0)
+    current_file = f
+    size_mb = f.size / 1_048_576
+    js.document.getElementById("fi-name").textContent = f.name
+    js.document.getElementById("fi-meta").textContent = f"{size_mb:.1f} MB · {f.type or 'RAW/binary'}"
+    js.document.getElementById("file-info").classList.add("visible")
+    js.document.getElementById("btn-process").disabled = False
+    js.document.getElementById("btn-reset").disabled   = False
+    js.document.getElementById("status-format").textContent = f.name.rsplit(".",1)[-1].upper()
+    log(f"Loaded {f.name} ({size_mb:.1f} MB)")
+
+async def process_image():
+    if not current_file:
+        log("No file selected", "warn")
+        return
+    params = get_params()
+    try:
+        await upload_and_process(current_file, params)
+    except Exception as e:
+        hide_loading()
+        log(f"Error: {str(e)}", "err")
+
+def download_result():
+    if result_url:
+        a = js.document.createElement("a")
+        a.href = result_url
+        a.download = "edited_photo.jpg"
+        a.click()
+
+def reset_controls():
+    sliders = ["exposure","highlights","shadows","blacks","whites",
+               "temp","tint","vibrance","saturation","sharpness","nr"]
+    for s in sliders:
+        js.document.getElementById(f"sl-{s}").value = 0
+    js.document.getElementById("sl-quality").value = 90
+    update_all_labels()
+    log("Controls reset")
+
+def update_all_labels():
+    for s in ["exposure","highlights","shadows","blacks","whites",
+              "temp","tint","vibrance","saturation","sharpness","nr","quality"]:
+        val = js.document.getElementById(f"sl-{s}").value
+        js.document.getElementById(f"v-{s}").textContent = val
+
+# Bind events
+js.document.getElementById("file-input").addEventListener("change", on_file_change)
+
+for sid in ["exposure","highlights","shadows","blacks","whites","temp","tint",
+            "vibrance","saturation","sharpness","nr","quality"]:
+    def make_handler(s):
+        def handler(e):
+            js.document.getElementById(f"v-{s}").textContent = e.target.value
+        return handler
+    js.document.getElementById(f"sl-{sid}").addEventListener("input", make_handler(sid))
+
+# Expose to JS
+js.window.processImage   = js.create_proxy(lambda: js.window.setTimeout(lambda: js.window._pyProcess(), 0))
+js.window._pyProcess     = js.create_proxy(process_image)
+js.window.downloadResult = js.create_proxy(download_result)
+js.window.resetControls  = js.create_proxy(reset_controls)
+</py-script>
+
+<script>
+// Drag-and-drop wiring
+const dz = document.getElementById("drop-zone");
+dz.addEventListener("dragover",  e => { e.preventDefault(); dz.classList.add("dragover"); });
+dz.addEventListener("dragleave", () => dz.classList.remove("dragover"));
+dz.addEventListener("drop", e => {
+  e.preventDefault(); dz.classList.remove("dragover");
+  const fi = document.getElementById("file-input");
+  const dt = new DataTransfer();
+  [...e.dataTransfer.files].forEach(f => dt.items.add(f));
+  fi.files = dt.files;
+  fi.dispatchEvent(new Event("change"));
+});
+
+function applyWBPreset(preset) {
+  document.querySelectorAll(".wb-presets button").forEach(b => b.classList.remove("active"));
+  event.target.classList.add("active");
+  const presets = {
+    "as-shot":     [0, 0],
+    "daylight":    [10, 5],
+    "cloudy":      [25, 10],
+    "shade":       [40, 20],
+    "tungsten":    [-80, -10],
+    "fluorescent": [-40, 20],
+    "flash":       [15, -5],
+  };
+  const [t, g] = presets[preset] || [0, 0];
+  document.getElementById("sl-temp").value  = t;
+  document.getElementById("sl-tint").value  = g;
+  document.getElementById("v-temp").textContent = t;
+  document.getElementById("v-tint").textContent = g;
+}
+</script>
+</body>
+</html>
